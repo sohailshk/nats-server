@@ -650,15 +650,28 @@ func (tr *subjectTransform) reverse() *subjectTransform {
 	// If we are here we need to dynamically get the correct reverse
 	// of this subjectTransform.
 	nsrc, phs := transformUntokenize(tr.dest)
+	// The reverse source has one partial wildcard per placeholder of the
+	// destination, in order. Source wildcard N has to be written back as the
+	// position of the destination placeholder that consumed it.
+	phpos := make(map[int]int, len(phs))
+	for i, ph := range phs {
+		tp, idxs, _, _, err := indexPlaceHolders(ph)
+		if err != nil || tp != Wildcard || len(idxs) != 1 {
+			return nil
+		}
+		phpos[idxs[0]] = i + 1
+	}
 	var nda []string
+	nw := 0
 	for _, token := range tr.stoks {
 		if token == pwcs {
-			if len(phs) == 0 {
+			nw++
+			pos, ok := phpos[nw]
+			if !ok {
 				// TODO(dlc) - Should not happen
 				return nil
 			}
-			nda = append(nda, phs[0])
-			phs = phs[1:]
+			nda = append(nda, fmt.Sprintf("$%d", pos))
 		} else {
 			nda = append(nda, token)
 		}

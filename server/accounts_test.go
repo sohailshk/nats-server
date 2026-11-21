@@ -3446,6 +3446,49 @@ func TestAccountImportsWithWildcardSupportStreamAndService(t *testing.T) {
 	}
 }
 
+func TestAccountImportsWithReorderedWildcards(t *testing.T) {
+	cf := createConfFile(t, []byte(`
+	port: -1
+	accounts {
+	  foo {
+	    users = [{user: derek, password: foo}]
+	    exports = [ { service: "svc.*.*.*" }, { stream: "evt.*.*.*" } ]
+	  }
+	  bar {
+	    users = [{user: ivan, password: bar}]
+	    imports = [
+	      { service: {account: "foo", subject: "svc.*.*.*"}, to: "my.$3.$1.$2" }
+	      { stream: {account: "foo", subject: "evt.*.*.*"}, to: "ev.$3.$1.$2" }
+	    ]
+	  }
+	}`))
+	s, opts := RunServerWithConfig(cf)
+	defer s.Shutdown()
+
+	ncFoo := natsConnect(t, fmt.Sprintf("nats://derek:foo@%s:%d", opts.Host, opts.Port))
+	defer ncFoo.Close()
+	ncBar := natsConnect(t, fmt.Sprintf("nats://ivan:bar@%s:%d", opts.Host, opts.Port))
+	defer ncBar.Close()
+
+	// Service import: the request must reach the original subject.
+	_, err := ncFoo.Subscribe("svc.>", func(m *nats.Msg) { m.Respond([]byte(m.Subject)) })
+	require_NoError(t, err)
+	require_NoError(t, ncFoo.Flush())
+	resp, err := ncBar.Request("my.c.a.b", nil, time.Second)
+	require_NoError(t, err)
+	require_Equal(t, string(resp.Data), "svc.a.b.c")
+
+	// Stream import: a literal subscription must only match the message
+	// published on the corresponding original subject.
+	sub := natsSubSync(t, ncBar, "ev.c.a.b")
+	require_NoError(t, ncBar.Flush())
+	natsPub(t, ncFoo, "evt.b.c.a", []byte("wrong"))
+	natsPub(t, ncFoo, "evt.a.b.c", []byte("right"))
+	m := natsNexMsg(t, sub, time.Second)
+	require_Equal(t, m.Subject, "ev.c.a.b")
+	require_Equal(t, string(m.Data), "right")
+}
+
 func BenchmarkNewRouteReply(b *testing.B) {
 	opts := defaultServerOptions
 	s := New(&opts)

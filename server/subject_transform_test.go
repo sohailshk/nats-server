@@ -136,6 +136,26 @@ func TestSubjectTransformHelpers(t *testing.T) {
 	}
 }
 
+func TestSubjectTransformReverseWithReorderedWildcards(t *testing.T) {
+	for _, test := range []struct {
+		src, dest, subject string
+	}{
+		{"foo.*.*.*", "bar.$3.$1.$2", "foo.a.b.c"},
+		{"foo.*.*.*", "bar.$2.$3.$1", "foo.a.b.c"},
+		{"foo.*.*.*", "bar.{{wildcard(3)}}.$1.{{wildcard(2)}}", "foo.a.b.c"},
+		{"*.x.*.*.>", "$3.$1.y.$2.>", "a.x.b.c.d.e"},
+	} {
+		t.Run(test.dest, func(t *testing.T) {
+			tr, err := NewSubjectTransformStrict(test.src, test.dest)
+			require_NoError(t, err)
+			rtr := tr.reverse()
+			require_NotNil(t, rtr)
+			transformed := tr.TransformSubject(test.subject)
+			require_Equal(t, rtr.TransformSubject(transformed), test.subject)
+		})
+	}
+}
+
 func TestSubjectTransforms(t *testing.T) {
 	shouldErr := func(src, dest string, strict bool) {
 		t.Helper()
